@@ -17,20 +17,20 @@ Path - http://te4.ygstr.com/api/check
 Request: 
 ```json
 {
-    card: "5f:46:ac:eb:75:a7:ea",
-    timestamp: 1567898719758,
-    id: "0",
-    token: "***********************************"
+    "card": "5f:46:ac:eb:75:a7:ea",
+    "timestamp": 1567898719758,
+    "id": "0",
+    "token": "***********************************"
 }
 ```
 
 Response: 
 ```json
 {
-    success: true,
-    check_in: false
-    name: "Michael Stevens",
-    timestamp: 1567898719958
+    "success": true,
+    "check_in": false,
+    "name": "Michael Stevens",
+    "timestamp": 1567898719958
 }
 ```
 
