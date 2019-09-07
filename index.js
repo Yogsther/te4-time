@@ -7,6 +7,7 @@
 
 const port = 80
 
+const bp = require("body-parser")
 const express = require("express")
 const http = require("http")
 const md5 = require("md5")
@@ -19,6 +20,7 @@ const hash = () => {
     return crypto.randomBytes(20).toString('hex')
 }
 
+const token = "3D86C458712FA798E680DFD3FAF602FB8BAFC144"
 
 /* MySQL promise API */
 class Database {
@@ -42,11 +44,57 @@ var con = mysql.createConnection({
 });
 
 var app = express()
+
+app.use(bp.json())
+app.use(bp.urlencoded({
+    extended: true
+}))
+
 var server = http.createServer(app).listen(port)
 var io = require("socket.io")(server)
 
+console.log(hash().toUpperCase())
+
+
+
 app.use(express.static(__dirname + '/cdn'))
 app.set('view engine', 'pug')
+
+
+app.post("/api/check", (req, res) => {
+    var body = req.body
+    if (body.token === token) {
+        if (body.card) {
+            if (body.timestamp) {
+                end({
+                    success: true,
+                    check_in: Math.random() > .5,
+                    timestamp: Date.now(),
+                    name: "Olle Kaiser"
+                })
+            } else {
+                end({
+                    success: false,
+                    reason: "No timestamp submitted"
+                })
+            }
+        } else {
+            end({
+                success: false,
+                reason: "No card submitted"
+            })
+        }
+    } else {
+        end({
+            success: false,
+            reason: "Invalid token"
+        })
+    }
+
+    function end(json) {
+        res.end((JSON.stringify(json)))
+    }
+})
 
 app.use((req, res, next) => {
     if (req.url.indexOf("?") !== -1) {
@@ -57,6 +105,7 @@ app.use((req, res, next) => {
         next()
     } else next()
 })
+
 
 app.get("*", (res, req, next) => {
     var url = res._parsedUrl.path.toString().substr(1)
