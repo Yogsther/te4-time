@@ -2,7 +2,7 @@
  * TE4 Time tracker
  * Let's the employes of TE4 check in - and out of their shifts.
  * Users can login through Slack and visit the website and link their key cards.
- * The webserver (this) also connects to check-in console (a Rasberry Pi)
+ * The webserver (this) also connects to check-in console (a Raspberry Pi)
  */
 
 const port = 80
