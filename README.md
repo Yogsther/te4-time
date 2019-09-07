@@ -28,7 +28,7 @@ Response:
 ```json
 {
     "success": true,
-    "check_in": false
+    "check_in": false,
     "name": "Michael Stevens",
     "timestamp": 1567898719958
 }
