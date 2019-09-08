@@ -1,0 +1,13 @@
+extends main
+block content
+    span(id="token" hidden) #{token}
+    div(id="welcome-box")
+        img(src="img/logo_256.png", id="logo" alt="Logo")
+        span(id="welcome-title") Welcome!
+        div(id="account-profile-preview")
+            img(id="profile-avatar-preview" src=avatar, alt="Profile photo")
+            span(id="profile-preview-name") #{name}
+            select(id="profile-title-choose" oninput="update_title(this)")
+                option(value="") Choose a title
+        button(class="btn btn-success" title="Choose a title in order to proceed." disabled id="ready-button" onclick="submit_title()") Got it!
+    script(src="js/join.js")

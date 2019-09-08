@@ -1,0 +1,12 @@
+extends main
+block content
+    div(id="wrap")
+        div(id="header")
+            img(src="img/logo_256.png" id="header-logo" alt="")
+            span(id="welcome-banner") Welcome back Olle, 
+                span(id="checked-in-status") Checked in
+        div(id="content")
+            div(id="card")
+                img(src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+P+/HgAFhAJ/wlseKgAAAABJRU5ErkJggg==", alt="Card" id="card_img")
+    script(src="https://cdn.jsdelivr.net/npm/jsbarcode@3.8.0/dist/barcodes/JsBarcode.ean-upc.min.js")
+    script(src="js/dashboard.js")

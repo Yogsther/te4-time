@@ -5,11 +5,10 @@
  * The webserver (this) also connects to check-in console (a Raspberry Pi)
  */
 
-const port = 80
-
 const bp = require("body-parser")
 const express = require("express")
 const http = require("http")
+const https = require("https")
 const md5 = require("md5")
 const pug = require("pug")
 const fs = require("file-system")
@@ -20,7 +19,43 @@ const hash = () => {
     return crypto.randomBytes(20).toString('hex')
 }
 
-const token = "3D86C458712FA798E680DFD3FAF602FB8BAFC144"
+const titles = [
+    "Front End Developer",
+    "Web Developer",
+    "Full Stack Developer",
+    "Software Developer",
+    "Software Engineer",
+    "Junior Software Developer",
+    "Senior Software Developer",
+    "Software Architect",
+    "Systems Architect",
+    "Chief Executive Officer",
+    "Chief Financial Officer",
+    "Chief Technology Officer",
+    "Chief Operating Officer"
+]
+
+var config
+try {
+    config = JSON.parse(fs.readFileSync("config.json"))
+} catch (e) {
+    console.log("Loading config.json failed, creating a default one.")
+    config = {
+        port: 80,
+        token: hash().toUpperCase(),
+        client_id: "CLIENT ID",
+        client_secret: "CLIENT SECRET",
+        mysql_host: "MYSQL URL",
+        mysql_user: "ADMIN",
+        mysql_pass: "PASSWORD",
+        database: "te4",
+        slack_team: "SLACK TEAM URL"
+    }
+    fs.writeFileSync("config.json", JSON.stringify(config))
+}
+
+const port = config.port
+
 
 /* MySQL promise API */
 class Database {
@@ -32,15 +67,24 @@ class Database {
             });
         });
     }
+
+    query_one(sql, args) {
+        return new Promise((resolve, reject) => {
+            con.query(sql, args, (err, rows) => {
+                if (err) return reject(err);
+                resolve(rows[0])
+            });
+        });
+    }
 }
 
 /* Connect to the database */
 var db = new Database()
 var con = mysql.createConnection({
-    host: 'localhost',
-    user: 'admin',
-    password: 'password',
-    database: 'te4'
+    host: config.mysql_host,
+    user: config.mysql_user,
+    password: config.mysql_pass,
+    database: config.database
 });
 
 var app = express()
@@ -52,10 +96,6 @@ app.use(bp.urlencoded({
 
 var server = http.createServer(app).listen(port)
 var io = require("socket.io")(server)
-
-console.log(hash().toUpperCase())
-
-
 
 app.use(express.static(__dirname + '/cdn'))
 app.set('view engine', 'pug')
@@ -96,7 +136,56 @@ app.post("/api/check", (req, res) => {
     }
 })
 
-app.use((req, res, next) => {
+app.get("/dashboard", (req, res) => {
+    res.render("dashboard")
+})
+
+app.get("/", (req, res) => {
+    res.render("index")
+})
+
+app.get("/auth", (req, res) => {
+    if (req.query.code) {
+        https.get(`https://slack.com/api/oauth.access?client_id=${config.client_id}&client_secret=${config.client_secret}&code=${req.query.code}`, resp => {
+            var data = ''
+            resp.on('data', (chunk) => {
+                data += chunk
+            })
+            resp.on('end', () => {
+                data = JSON.parse(data)
+                if (data.ok) {
+                    if (data.team.domain === config.slack_team) {
+                        (async () => {
+                            var user = await db.query_one("SELECT * FROM users WHERE email = ?", data.user.email)
+                            if (user) {
+                                // Generate new token for user
+                            } else {
+                                // Create account
+                                await db.query("INSERT INTO users (first_name, last_name, email, avatar, access_token, created, barcode) VALUES (?, ?, ?, ?, ?, ?, ?)", [data.user.name.split(" ")[0], data.user.name.split(" ")[1], data.user.email, data.user.image_512, data.access_token, Date.now(), "TODO"])
+                                user = await db.query_one("SELECT * FROM users WHERE email = ?", data.user.email)
+                                var token = hash()
+                                await db.query("INSERT INTO tokens (user, token, created) VALUES (?, ?, ?)", [user.id, token, Date.now()])
+                                res.render("joined", {
+                                    token: token,
+                                    name: user.first_name + " " + user.last_name,
+                                    avatar: user.avatar
+                                })
+                            }
+                        })()
+                    } else {
+                        res.end("You are not authorized to login with this service.")
+                    }
+
+                    console.log(data)
+                } else {
+                    res.end(data.error)
+                }
+            })
+        })
+    }
+})
+
+/* app.use((req, res, next) => {
     if (req.url.indexOf("?") !== -1) {
         req.url = req.url.split("?")[0]
     }
@@ -104,9 +193,9 @@ app.use((req, res, next) => {
         req.url += '.html'
         next()
     } else next()
-})
+}) */
 
-
+/* 
 app.get("*", (res, req, next) => {
     var url = res._parsedUrl.path.toString().substr(1)
 
@@ -119,10 +208,35 @@ app.get("*", (res, req, next) => {
     } else {
         next()
     }
-})
+}) */
 
 io.on("connection", socket => {
-    console.log("CoNnEcTeD :3")
+    socket.on("get_titles", () => {
+        socket.emit("titles", titles)
+    })
+
+    socket.on("set_title", data => {
+        if (data.token && data.title) {
+            if (titles.indexOf(data.title) != -1) {
+                (async () => {
+                    var token = await db.query_one("SELECT * FROM tokens WHERE token = ?", data.token)
+                    if (token) {
+                        var user = await db.query_one("SELECT * FROM users WHERE id = ?", token.user)
+                        if (user) {
+                            db.query("UPDATE users SET title = ? WHERE id = ?", [data.title, user.id])
+                            socket.emit("title_updated")
+                        }
+                    } else {
+                        socket.emit("err", "Invalid token")
+                    }
+                })()
+            } else {
+                socket.emit("err", "Not a valid title")
+            }
+        } else {
+            socket.emit("err", "Missing fields")
+        }
+    })
 })
 
 console.log(`
