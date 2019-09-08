@@ -14,7 +14,7 @@ The webserver also connects to check-in console (a Raspberry Pi) via the API
 
 Check-in and check-out
 
-Path - http://te4.ygstr.com/api/check
+URL: https://te4.ygstr.com/api/check
 
 Request: 
 ```json
