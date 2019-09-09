@@ -13,6 +13,7 @@ const md5 = require("md5")
 const pug = require("pug")
 const fs = require("file-system")
 const mysql = require("mysql")
+const wrap = require('async-middleware').wrap
 const crypto = require("crypto")
 
 const hash = () => {
@@ -36,6 +37,13 @@ const titles = [
 ]
 
 var config
+
+var link_mode = {
+    duration: 15,
+    started: 0,
+    user: 0
+}
+
 try {
     config = JSON.parse(fs.readFileSync("config.json"))
 } catch (e) {
@@ -55,7 +63,14 @@ try {
 }
 
 const port = config.port
+var online_users = []
 
+class User {
+    constructor(user_id, socket_id) {
+        this.user_id = user_id
+        this.socket_id = socket_id
+    }
+}
 
 /* MySQL promise API */
 class Database {
@@ -64,8 +79,8 @@ class Database {
             con.query(sql, args, (err, rows) => {
                 if (err) return reject(err);
                 resolve(rows);
-            });
-        });
+            })
+        })
     }
 
     query_one(sql, args) {
@@ -73,8 +88,8 @@ class Database {
             con.query(sql, args, (err, rows) => {
                 if (err) return reject(err);
                 resolve(rows[0])
-            });
-        });
+            })
+        })
     }
 }
 
@@ -101,17 +116,29 @@ app.use(express.static(__dirname + '/cdn'))
 app.set('view engine', 'pug')
 
 
-app.post("/api/check", (req, res) => {
+app.post("/api/check", async (req, res) => {
     var body = req.body
-    if (body.token === token) {
+    /* (async() => { */
+    if (body.token === config.token) {
         if (body.card) {
             if (body.timestamp) {
-                end({
-                    success: true,
-                    check_in: Math.random() > .5,
-                    timestamp: Date.now(),
-                    name: "Olle Kaiser"
-                })
+                if (Date.now() - link_mode.started > link_mode.duration * 1000) {
+                    end({
+                        success: true,
+                        check_in: Math.random() > .5,
+                        timestamp: Date.now()
+                    })
+                } else {
+                    // LINK MODE
+                    await db.query("INSERT into cards (user, serial, active) VALUES (?, ?, ?)", [link_mode.user, body.card, true])
+                    end({
+                        success: true,
+                        write: true,
+                        timestamp: Date.now()
+                    })
+                    console.log("Card linked!")
+                }
+
             } else {
                 end({
                     success: false,
@@ -130,6 +157,7 @@ app.post("/api/check", (req, res) => {
             reason: "Invalid token"
         })
     }
+    /*  })() */
 
     function end(json) {
         res.end((JSON.stringify(json)))
@@ -142,6 +170,10 @@ app.get("/dashboard", (req, res) => {
 
 app.get("/", (req, res) => {
     res.render("index")
+})
+
+app.get("/admin", (req, res) => {
+    res.render("admin")
 })
 
 app.get("/auth", (req, res) => {
@@ -159,9 +191,14 @@ app.get("/auth", (req, res) => {
                             var user = await db.query_one("SELECT * FROM users WHERE email = ?", data.user.email)
                             if (user) {
                                 // Generate new token for user
+                                var token = hash()
+                                await db.query("INSERT INTO tokens (user, token, created) VALUES (?, ?, ?)", [user.id, token, Date.now()])
+                                res.render("dashboard", {
+                                    token
+                                })
                             } else {
                                 // Create account
-                                await db.query("INSERT INTO users (first_name, last_name, email, avatar, access_token, created, barcode) VALUES (?, ?, ?, ?, ?, ?, ?)", [data.user.name.split(" ")[0], data.user.name.split(" ")[1], data.user.email, data.user.image_512, data.access_token, Date.now(), "TODO"])
+                                await db.query("INSERT INTO users (first_name, last_name, email, avatar, access_token, created, barcode) VALUES (?, ?, ?, ?, ?, ?, ?)", [data.user.name.split(" ")[0], data.user.name.split(" ")[1], data.user.email, data.user.image_512, data.access_token, Date.now(), Math.floor(10000000000 + Math.random() * 90000000000)])
                                 user = await db.query_one("SELECT * FROM users WHERE email = ?", data.user.email)
                                 var token = hash()
                                 await db.query("INSERT INTO tokens (user, token, created) VALUES (?, ?, ?)", [user.id, token, Date.now()])
@@ -215,29 +252,140 @@ io.on("connection", socket => {
         socket.emit("titles", titles)
     })
 
-    socket.on("set_title", data => {
-        if (data.token && data.title) {
-            if (titles.indexOf(data.title) != -1) {
-                (async () => {
-                    var token = await db.query_one("SELECT * FROM tokens WHERE token = ?", data.token)
-                    if (token) {
-                        var user = await db.query_one("SELECT * FROM users WHERE id = ?", token.user)
-                        if (user) {
-                            db.query("UPDATE users SET title = ? WHERE id = ?", [data.title, user.id])
-                            socket.emit("title_updated")
-                        }
-                    } else {
-                        socket.emit("err", "Invalid token")
-                    }
-                })()
-            } else {
-                socket.emit("err", "Not a valid title")
-            }
-        } else {
-            socket.emit("err", "Missing fields")
+    socket.on("disconnect", () => {
+        for (var i = 0; i < online_users; i++) {
+            if (user.socket_id == socket.id) online_users.splice(i, 1)
         }
     })
+
+    socket.on("login", token => {
+        if (token) {
+            (async () => {
+                var db_token = await db.query_one("SELECT * FROM tokens WHERE token = ?", token)
+                if (db_token) {
+                    var user = await db.query_one("SELECT * FROM users WHERE id = ?", db_token.user)
+                    if (user) {
+                        user.checked_in = await is_checked_in(user.id)
+                        online_users.push(new User(user.id, socket.id))
+                        socket.emit("login", user)
+                    } else {
+                        socket.emit("login", "User does not exist")
+                    }
+                } else {
+                    socket.emit("login", "Invalid token")
+                }
+            })()
+        }
+    })
+
+    socket.on("check_in", token => {
+        if (token) {
+            (async () => {
+                var db_token = await db.query_one("SELECT * FROM tokens WHERE token = ?", token)
+                if (db_token) {
+                    var user = await db.query_one("SELECT * FROM users WHERE id = ?", db_token.user)
+                    if (user) {
+                        check_in(user.id)
+                    }
+                }
+            })()
+        }
+    })
+
+    socket.on("get_accounts", token => {
+        (async () => {
+            var user = await get_user_from_token(token)
+            if (user) {
+                console.log(user)
+                if (user.admin) {
+                    var all_users = await db.query("SELECT * FROM users")
+                    socket.emit("all_users", all_users)
+                }
+            }
+        })()
+    })
+
+    socket.on("link_card", data => {
+            if (data.token && data.user) {
+                (async () => {
+                        var requester = await get_user_from_token(data.token)
+                        if (requester) {
+                            if (requester.admin) {
+                                var user = await db.query_one("SELECT * FROM users WHERE id = ?", data.user)
+                                if (user) {
+                                    link_mode.started = Date.now()
+                                    link_mode.user = user.id
+                                }
+                                socket.emit("err", "Link initated, duration " + link_mode.duration + " seconds. Please blip the card you would like to link.")
+                            } else {
+                                socket.emit("err", "Please submit a valid user")
+                            }
+                        }
+                })()
+        }
+    })
+
+socket.on("set_title", data => {
+    if (data.token && data.title) {
+        if (titles.indexOf(data.title) != -1) {
+            (async () => {
+                var token = await db.query_one("SELECT * FROM tokens WHERE token = ?", data.token)
+                if (token) {
+                    var user = await db.query_one("SELECT * FROM users WHERE id = ?", token.user)
+                    if (user) {
+                        db.query("UPDATE users SET title = ? WHERE id = ?", [data.title, user.id])
+                        socket.emit("title_updated")
+                    }
+                } else {
+                    socket.emit("err", "Invalid token")
+                }
+            })()
+        } else {
+            socket.emit("err", "Not a valid title")
+        }
+    } else {
+        socket.emit("err", "Missing fields")
+    }
 })
+})
+
+async function check_in(user_id) {
+    var user = await db.query_one("SELECT * FROM users WHERE id = ?", user_id)
+    if (user) {
+        var user_status = await db.query_one("SELECT * FROM checks WHERE user = ? ORDER BY time DESC LIMIT 1", user_id)
+
+        if (!user_status) {
+            user_status = {
+                check_in: true
+            }
+        }
+
+        await db.query("INSERT INTO checks (user, check_in, time) VALUES (?, ?, ?)", [user.id, !user_status.check_in, Date.now()])
+        for (online_user of online_users) {
+
+            if (online_user.user_id == user.id) {
+                io.to(online_user.socket_id).emit("check_in_update", !user_status.check_in)
+            }
+        }
+    }
+}
+
+async function get_user_from_token(token) {
+    var db_token = await db.query_one("SELECT * FROM tokens WHERE token = ?", token)
+    if (db_token) {
+        var user = await db.query_one("SELECT * FROM users WHERE id = ?", db_token.user)
+        if (user) {
+            return user
+        } else {
+            return false
+        }
+    }
+}
+
+async function is_checked_in(user_id) {
+    var user_status = await db.query_one("SELECT * FROM checks WHERE user = ? ORDER BY time DESC LIMIT 1", user_id)
+    return user_status.check_in
+}
 
 console.log(`
         T4 Time started

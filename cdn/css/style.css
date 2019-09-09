@@ -1,31 +1,33 @@
-:root{
+:root {
     --red: #ff1e54;
+    --mdc-theme-primary: var(--red);
+    --mdc-theme-secondary: #c7c7c7;
 }
 
 
-#logo{
+#logo {
     height: 50px;
     position: absolute;
     top: 15px;
     left: 15px;
 }
 
-body{
+body {
     background: rgb(243, 243, 243);
     font-family: 'Roboto', sans-serif;
 }
 
-img{
+img {
     -webkit-user-drag: none;
 }
 
-#add-to-slack{
+#add-to-slack {
     margin: 0 auto;
     display: block;
     position: relative;
 }
 
-#index-title{
+#index-title {
     margin: 0 auto;
     display: block;
     position: relative;
@@ -35,7 +37,7 @@ img{
     margin-top: 50px;
 }
 
-#login-box{
+#login-box {
     border-radius: 10px;
     max-width: 300px;
     width: 100%;
@@ -49,7 +51,7 @@ img{
     margin-top: 10vh;
 }
 
-#welcome-box{
+#welcome-box {
     border-radius: 10px;
     max-width: 400px;
     width: 100%;
@@ -63,7 +65,7 @@ img{
     margin-top: 10vh;
 }
 
-#welcome-title{
+#welcome-title {
     display: block;
     position: relative;
     text-align: center;
@@ -71,7 +73,7 @@ img{
     margin-top: 15px;
 }
 
-#account-profile-preview{
+#account-profile-preview {
     position: relative;
     width: 90%;
     height: 80px;
@@ -82,7 +84,7 @@ img{
     display: block;
 }
 
-#profile-avatar-preview{
+#profile-avatar-preview {
     position: absolute;
     left: 10px;
     top: 10px;
@@ -90,7 +92,7 @@ img{
     height: 60px;
 }
 
-#profile-preview-name{
+#profile-preview-name {
     position: absolute;
     top: 12px;
     left: 80px;
@@ -98,7 +100,7 @@ img{
     color: white;
 }
 
-#profile-title-choose{
+#profile-title-choose {
     position: absolute;
     left: 80px;
     bottom: 15px;
@@ -108,53 +110,59 @@ img{
     padding: 2px;
 }
 
-*:focus{
+*:focus {
     outline: none;
 }
 
-#ready-button{
+#ready-button {
     position: relative;
     margin: 0 auto;
     display: block;
     margin-top: 25px;
 }
 
-#wrap{
+#wrap {
     width: calc(100% - 150px);
-    margin:0 auto;
+    margin: 0 auto;
     display: block;
     position: relative;
     max-width: 1000px;
 }
 
-#header{
+#header {
     display: block;
     position: relative;
     width: 100%;
     height: 80px;
     margin-top: 10px;
     font-family: Georgia, 'Times New Roman', Times, serif;
-    
+
 }
 
 
-#header-logo{
+#header-logo {
     height: 80px;
 }
 
-#welcome-banner{
+#welcome-banner {
     font-size: 25px;
     position: relative;
     margin-left: 25px;
-    top: 5px;
+    height: 25px;
+    top: -29px;
+    display: inline-block;
 }
 
-#checked-in-status{
+#checked-in-status {
     border-bottom: solid 4px var(--red);
 }
 
+#checked-in-status-out {
+    border-bottom: solid 4px rgb(39, 39, 39);
+}
 
-#content{
+
+#content {
     width: 100%;
     display: block;
     height: calc(85vh - 100px);
@@ -162,31 +170,31 @@ img{
     max-height: 600px;
     position: relative;
     margin-top: 10px;
-    
+
     background: rgb(255, 255, 255);
     border-radius: 10px;
     box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.15);
 }
 
-#card{
-/*     visibility: hidden; */
+#card {
+    /*     visibility: hidden; */
     background: rgb(255, 255, 255);
     position: relative;
     right: -50px;
     top: 50px;
     float: right;
-    border-radius: 10px;
+    border-radius: 25px;
     box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.25);
     overflow: hidden;
     cursor: pointer;
     transition: top .25s;
 }
 
-#card:hover{
+#card:hover {
     top: 40px;
 }
 
-#barcode{
+#barcode {
     margin: 0 auto;
     display: block;
     position: absolute;
@@ -196,3 +204,33 @@ img{
     visibility: hidden;
 }
 
+#check-in-button {
+    position: absolute;
+    left: 25px;
+    bottom: 25px;
+    height: 50px;
+    width: 180px;
+    font-size: 20px;
+}
+
+#log-out-button{
+    position: absolute;
+    left: 220px;
+    bottom: 25px;
+    height: 50px;
+    width: 130px;
+    font-size: 20px;
+}
+
+
+#choose-account{
+    right: -10px;
+    width: 200px;
+    position: relative;
+    margin-right: 10px;
+    padding: 5px;
+}
+
+#link-card{
+    margin: 10px;
+}
