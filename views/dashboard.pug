@@ -8,8 +8,10 @@ block content
                 //span(id="checked-in-status") Checked in
         div(id="content")
             button(class="mdc-button mdc-button--raised" id="check-in-button" onclick="check_in()") CHECK IN
-            button(class="mdc-button mdc-button" id="log-out-button" onclick="logout()") Log out
-            div(id="card")
+            button(class="mdc-button" id="log-out-button" onclick="logout()") Log out
+            div(id="card" onclick="open_card_menu()")
                 img(src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+P+/HgAFhAJ/wlseKgAAAABJRU5ErkJggg==", alt="Card" id="card_img")
-    script(src="https://cdn.jsdelivr.net/npm/jsbarcode@3.8.0/dist/barcodes/JsBarcode.ean-upc.min.js")
+    div(id="overlay")
+
+    script(src="js/card.js")
     script(src="js/dashboard.js")

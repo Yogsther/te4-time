@@ -1,8 +1,14 @@
 extends main
 block content
-    span Link card to account
-    select(id="choose-account")
-        option(value="") Choose account
-    button(class="" id="link-card" onclick="link_card()") Link card
 
+    | Print cards for (max 9): 
+    select(id="choose-account" oninput="add_account(this)")
+        option(value="") Add account
+
+    button(class="mdc-button mdc-button--raised" id="generate-cards-button" onclick="generate()") Generate A4 template
+
+    div(id="selected-users")
+    img(id="output")
+
+    script(src="js/card.js")
     script(src="js/admin.js")

@@ -1,26 +1,50 @@
-if(document.getElementById("token").innerText != ""){
+if (document.getElementById("token").innerText != "") {
     token = document.getElementById("token").innerText
     localStorage.setItem("token", token)
     location.href = "/dashboard"
 } else {
-    if(!token){
+    if (!token) {
         location.href = "/"
+    }
+}
+
+var my_cards = []
+
+function load() {
+    var loaded = 0
+    for (var image in images) {
+        var src = images[image]
+        images[image] = new Image()
+        images[image].onload = () => {
+            complete()
+        }
+        images[image].src = src
+    }
+
+    function complete() {
+        loaded++
+        if (loaded >= Object.keys(images).length) {
+            if (me) generate_card_on_canvas()
+        }
     }
 }
 
 
 on_login = () => {
     update_check_in_status(me.checked_in)
-    generate_card()
+
+    // Loads images
+    images.qr = me.qr
+    load()
 }
 
-function update_check_in_status(checked_in){
+function update_check_in_status(checked_in) {
     me.checked_in = checked_in
     document.getElementById("welcome-banner").innerHTML = "Welcome back " + me.first_name + ", " +
-    (checked_in ? "<span id='checked-in-status'>checked in</span>" : "<span id='checked-in-status-out'>checked out</span>")
+        (checked_in ? "<span id='checked-in-status'>checked in</span>" : "<span id='checked-in-status-out'>checked out</span>")
     var check_in_button = document.getElementById("check-in-button")
-    check_in_button.innerText = (checked_in ? "check out": "check in")
-    if(checked_in){
+    check_in_button.innerText = (checked_in ? "check out" : "check in")
+    if (checked_in) {
         check_in_button.classList.remove("mdc-button--raised")
         check_in_button.classList.add("mdc-button--outlined")
     } else {
@@ -33,92 +57,155 @@ on_login_fail = (msg) => {
     location.href = "/"
 }
 
-var images = {
-    nti: "img/nti.png",
-    logo: "img/logo_256_black.png",
-    strip: "img/strip.png",
-    contactless: "img/contactless.png"
-}
-
 socket.on("check_in_update", checked_in => {
-    console.log("REEE")
-    update_check_in_status(checked_in)  
+    update_check_in_status(checked_in)
 })
 
-// Loads images
-load()
-function load(){
-    var loaded = 0
-    for(var image in images){
-        var src = images[image]
-        images[image] = new Image()
-        images[image].onload = () => {
-            complete()
+
+
+var overlay_open = false
+
+document.addEventListener("mousedown", e => {
+    if (e.target.id == "card_img") return
+
+    var click_outside = true
+    for (var el of e.composedPath()) {
+        if (el.id == "overlay-window") {
+            click_outside = false
         }
-        images[image].src = src
     }
-    function complete(){
-        loaded++
-        if(loaded >= Object.keys(images).length){
-            generate_card()
+    if (click_outside) {
+        close_overlay()
+    }
+})
+
+function close_overlay() {
+    overlay_open = false
+    document.getElementById("overlay").style.visibility = "hidden"
+}
+
+function open_card_menu() {
+    socket.emit("get_cards_info", token)
+    overlay_open = true
+    var overlay = document.getElementById("overlay")
+    overlay.style.visibility = "visible"
+    overlay.innerHTML = `
+    <div id="overlay-window">
+        <input id="link-input" value="${me.qr_redir == null ? "" : me.qr_redir}" oninput="update_qr(this)" placeholder="Enter URL for your QR-code"></input>
+        <img src="img/check.png" id="url-status">
+        <div id="sync-window"><span id="sync-status">Ready to link</span><button class="mdc-button mdc-button--raised"
+            id="link-button-overlay" onclick="add_card()">add new card</button></div>
+            <span id="synced-cards"></span>
+        
+    </div>`
+    insert_synced_cards()
+}
+
+socket.on("my_cards", recived_cards => {
+    my_cards = recived_cards
+    insert_synced_cards()
+})
+
+
+var update_qr_url
+var loading_gif = new Image()
+    loading_gif.src = "img/loading.gif"
+function update_qr(el){
+    update_qr_url = el.value
+    me.qr_redir = el.value
+    socket.emit("update_qr", {token: token, url: update_qr_url})
+    document.getElementById("url-status").src = loading_gif.src
+}
+
+socket.on("qr_update_success", url => {
+    if(url == update_qr_url){
+        document.getElementById("url-status").src = "img/check.png"
+    }
+})
+
+function insert_synced_cards() {
+    var cardhodler = document.getElementById("synced-cards")
+    if (cardhodler) {
+        var build = ""
+        for (var card of my_cards) {
+            var date = new Date(card.created)
+            build += `<div class="added-card"><button class="mdc-button remove-card-button" onclick="unsync(${card.id})">remove</button>
+            <span class="serial-text">Serial: <span class="serial">
+                ${card.serial}
+            </span>
+        </span>
+        <span class="card-date">${date.getDate()}/${date.getMonth()+1}/${date.getFullYear()}</span>
+        </div>`
         }
+        cardhodler.innerHTML = build
     }
 }
 
-function generate_card() {
-    if(!me) return
-    var canvas = document.createElement("canvas")
-    canvas.height = 1000
-    canvas.width = 630
-    var ctx = canvas.getContext("2d")
+function unsync(id){
+    socket.emit("unsync", {id, token})
+}
 
-    var logo = images.logo
-    var nti = images.nti
-    var strip = images.strip
+socket.on("unsync_success", () => {
+    socket.emit("get_cards_info", token)
+})
 
-    ctx.fillStyle = "white"
-    ctx.fillRect(0, 0, canvas.width, canvas.height)
-    var strip_scale = 1
-    ctx.drawImage(strip, 135, 700, strip.width * strip_scale, strip.height * strip_scale)
+function add_card() {
+    socket.emit("request_to_write_card", token)
+}
 
-    var barcode = document.createElement("canvas")
-    var barcode_scale = 1.5
-    JsBarcode(barcode, me.barcode, {
-        format: "upc"
-    })
+var started_syncing = 0
+var syncing_time = 0
+var write_succes = false
+var syncing_interval
 
-    ctx.font = "90px Georgia"
-    ctx.fillStyle = "black"
-    ctx.fillText(me.last_name, 80, 150)
-    ctx.fillText(me.first_name, 80, 260)
+socket.on("read_ready", time => {
+    started_syncing = Date.now()
+    syncing_time = time
+    write_succes = false
+    document.getElementById("sync-status").innerHTML = "Syncing " + time + "s"
+    syncing_interval = setInterval(() => {
+        if (write_succes) {
+            clearInterval(write_succes)
+            return
+        }
+        var time_left = (syncing_time * 1000) - (Date.now() - started_syncing)
+        if (time_left > 0) {
+            document.getElementById("sync-status").innerHTML = "Syncing " + force_lengt(Math.round(time_left / 100) / 10) + "s"
 
-    var nti_scale = .8
+            function force_lengt(input) {
+                if (input.toString().indexOf(".") == -1) return input.toString() + ".0"
+                return input
+            }
+        } else {
+            clearInterval(syncing_interval)
+            document.getElementById("sync-status").innerHTML = "Ready to link"
+        }
+    }, 100);
+})
 
+socket.on("write_success", serial => {
+    socket.emit("get_cards_info", token)
+    clearInterval(syncing_interval)
+    write_succes = true
+    document.getElementById("sync-status").innerHTML = "<span style='color:#72ff36;'>Success!</span>"
+})
 
-    ctx.drawImage(barcode, (canvas.width / 2 - (barcode.width / 2) * barcode_scale), (canvas.height - 100 - (barcode.height * barcode_scale)), barcode.width * barcode_scale, barcode.height * barcode_scale)
-    ctx.drawImage(logo, 35, 735, 100, 100)
-    ctx.drawImage(nti, (canvas.width / 2 - (nti.width / 2) * nti_scale), (canvas.height - 350 - (nti.height * nti_scale)), nti.width * nti_scale, nti.height * nti_scale)
-
-    ctx.drawImage(images.contactless, 470, 120, 100, 100)
-
-    ctx.font = "30px Georgia"
-    ctx.fillText(me.title, 80, 320)
-
-
-    // Render out
-    document.getElementById("card_img").src = canvas.toDataURL("image/png")
+function generate_card_on_canvas() {
+    document.getElementById("card_img").src = generate_card()
     resize_card()
 }
 
 function resize_card() {
-    document.getElementById("card_img").style.height = document.getElementById("content").getBoundingClientRect().height - 100 + "px"
+    var card_height = document.getElementById("content").getBoundingClientRect().height
+    var card = document.getElementById("card_img");
+    card.style.height = card_height - 100 + "px"
+    document.getElementById("card").style.borderRadius = card_height / 25 + "px"
 }
-
 
 window.onresize = () => {
     resize_card()
 }
 
-function check_in(){
+function check_in() {
     socket.emit("check_in", token)
 }

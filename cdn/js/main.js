@@ -9,7 +9,6 @@ if(token){
 }
 
 socket.on("login", data => {
-    console.log(data)
     if(data.id){
         me = data
         on_login()
