@@ -9,11 +9,8 @@ const bp = require("body-parser")
 const express = require("express")
 const http = require("http")
 const https = require("https")
-const md5 = require("md5")
-const pug = require("pug")
 const fs = require("file-system")
 const mysql = require("mysql")
-const wrap = require('async-middleware').wrap
 const crypto = require("crypto")
 const QR = require("qrcode")
 
@@ -21,6 +18,9 @@ const hash = () => {
     return crypto.randomBytes(20).toString('hex')
 }
 
+/*  Possible titles to choose from when signing up
+    TODO: Add an option for users to change thier title.
+*/
 const titles = [
     "Front End Developer",
     "Web Developer",
@@ -39,7 +39,12 @@ const titles = [
     "Dev Ops Developer"
 ]
 
-var config
+
+/**
+ * If the console is in link mode, how much time is left and what user it's about to link
+ * This variable is checked on every card-check in if (now - started < duration) then the card
+ * will be linked to the user 
+ */
 
 var link_mode = {
     duration: 15,
@@ -47,28 +52,54 @@ var link_mode = {
     user: 0
 }
 
+
+/**
+ * Load the main config, if the file does not exist or the parse fails, it creates a new file. 
+ * TODO: Watch if only the parse fail and perhaps and then don't overwrite the old config
+ */
+
+// Global variable for the config, used everytime you want to grab a user-inputed variable
+var config
+
 try {
     config = JSON.parse(fs.readFileSync("config.json"))
 } catch (e) {
     console.log("Loading config.json failed, creating a default one.")
     config = {
+        // Port of the webserver and REST API
         port: 80,
+        // Token for the REST API
         token: hash().toUpperCase(),
+        // Slack app info
         client_id: "CLIENT ID",
         client_secret: "CLIENT SECRET",
+        // mySQL connection information
         mysql_host: "MYSQL URL",
         mysql_user: "ADMIN",
         mysql_pass: "PASSWORD",
+        // Database name
         database: "te4",
-        slack_team: "SLACK TEAM URL"
+        // Slack team name of the users who are allowed to sign in
+        slack_team: "SLACK TEAM NAME",
+        // IP's that are allowed to check in (you can always checkout from any IP). Leave blank to allowed all IP's
+        house_ips: []
     }
     fs.writeFileSync("config.json", JSON.stringify(config))
 }
 
+// Port of the website and REST API
 const port = config.port
-var online_users = []
 
+
+/* User of online users. When someone logs in their socket.id is matched to their user id. This allowes us to
+   send information via the websocket, ex. when the user checks in via card and the website also updates */
+var online_users = []
 class User {
+    /**
+     *  Initiate a new user
+     * @param {*} user_id ID of the user (mysql)
+     * @param {*} socket_id The sessions (user) socket id (socket.id)
+     */
     constructor(user_id, socket_id) {
         this.user_id = user_id
         this.socket_id = socket_id
@@ -77,6 +108,11 @@ class User {
 
 /* MySQL promise API */
 class Database {
+    /**
+     * Normal SQL query but promise based
+     * @param {*} sql query
+     * @param {*} args possible arguments
+     */
     query(sql, args) {
         return new Promise((resolve, reject) => {
             con.query(sql, args, (err, rows) => {
@@ -85,7 +121,11 @@ class Database {
             })
         })
     }
-
+    /**
+     * SELECT only one item
+     * @param {*} sql query
+     * @param {*} args possible arguments
+     */
     query_one(sql, args) {
         return new Promise((resolve, reject) => {
             con.query(sql, args, (err, rows) => {
@@ -105,19 +145,29 @@ var con = mysql.createConnection({
     database: config.database
 });
 
+// Setup the web server via express
 var app = express()
 
+// Use body-parser to read json/type in post / get requests
 app.use(bp.json())
 app.use(bp.urlencoded({
     extended: true
 }))
 
+// Create the server and start it on the port in config.json
 var server = http.createServer(app).listen(port)
+// Bind socket.io to the webserver, (socket.io, REST API and the website are all on the same port)
 var io = require("socket.io")(server)
 
+// Bind the cdn folder to the webserver, everything in it is accessable via the website
 app.use(express.static(__dirname + '/cdn'))
+// Enable PUG rendering in the express app
 app.set('view engine', 'pug')
 
+/**
+ * Log messages with an included timestamp
+ * @param {*} msg Message to log
+ */
 function log(msg) {
     var date = new Date()
     console.log(`[${force_length(date.getHours())}:${force_length(date.getMinutes())}:${force_length(date.getSeconds())}] ${msg}`)
@@ -128,70 +178,80 @@ function log(msg) {
 }
 
 
+/**
+ * REST API
+ * 
+ * POST /api/check
+ * 
+ *      Required fields:
+ *          {
+ *              token: (String) authentication token (config.json:token)
+ *              card: (String | Integer) Serial or ID of the card (NFC)
+ *          }
+ * 
+ *      Called whenever a card is registered on the NFC console
+ *      the response (JSON) will always include the attribute "success" (if the action did something)
+ *      If success is true, it will also include "write" (if the card was linked to a user)
+ *      if success is false, a "reason" will be included
+ */
 
 app.post("/api/check", async (req, res) => {
     var body = req.body
     if (body.token === config.token) {
         if (body.card) {
-            if (body.timestamp) {
-                if (Date.now() - link_mode.started > link_mode.duration * 1000) {
-                    var card = await db.query_one("SELECT * FROM cards WHERE serial = ?", body.card)
-                    if (card) {
-                        var user = await db.query_one("SELECT * FROM users WHERE id = ?", card.user)
-                        if (user) {
-                            var checked_in = await check_in(user.id, "card")
-                            end({
-                                success: true,
-                                write: false,
-                                check_in: checked_in,
-                                timestamp: Date.now()
-                            })
+            if (Date.now() - link_mode.started > link_mode.duration * 1000) {
+                var card = await db.query_one("SELECT * FROM cards WHERE serial = ?", body.card)
+                if (card) {
+                    var user = await db.query_one("SELECT * FROM users WHERE id = ?", card.user)
+                    if (user) {
+                        var checked_in = await check_in(user.id, "card")
+                        end({
+                            success: true,
+                            write: false,
+                            check_in: checked_in,
+                            timestamp: Date.now()
+                        })
 
-                        } else {
-                            end({
-                                success: false,
-                                reason: "User account has been deleted"
-                            })
-                        }
                     } else {
                         end({
                             success: false,
-                            reason: "Card is not linked"
+                            reason: "User account has been deleted"
                         })
                     }
                 } else {
-                    var existing_card = await db.query_one("SELECT * FROM cards WHERE serial = ?", body.card)
-                    if (!existing_card) {
-                        // LINK MODE
-                        await db.query("INSERT into cards (user, serial, active, created) VALUES (?, ?, ?, ?)", [link_mode.user, body.card, true, Date.now()])
-                        end({
-                            success: true,
-                            write: true,
-                            timestamp: Date.now()
-                        })
-                        for (socket_user of online_users) {
-                            if (socket_user.user_id == link_mode.user) {
-                                io.to(socket_user.socket_id).emit("write_success", body.card)
-                            }
+                    end({
+                        success: false,
+                        reason: "Card is not linked"
+                    })
+                }
+            } else {
+                var existing_card = await db.query_one("SELECT * FROM cards WHERE serial = ?", body.card)
+                if (!existing_card) {
+                    // LINK MODE
+                    await db.query("INSERT into cards (user, serial, active, created) VALUES (?, ?, ?, ?)", [link_mode.user, body.card, true, Date.now()])
+                    end({
+                        success: true,
+                        write: true,
+                        timestamp: Date.now()
+                    })
+                    for (socket_user of online_users) {
+                        if (socket_user.user_id == link_mode.user) {
+                            io.to(socket_user.socket_id).emit("write_success", body.card)
                         }
-                        log("Linked card for user " + link_mode.user + ", card: " + body.card)
-                        link_mode.user = 0
-                        link_mode.started = 0
-                    } else {
-                        end({
-                            success: false,
-                            reason: "Card is already linked"
-                        })
                     }
-
+                    log("Linked card for user " + link_mode.user + ", card: " + body.card)
+                    link_mode.user = 0
+                    link_mode.started = 0
+                } else {
+                    end({
+                        success: false,
+                        reason: "Card is already linked"
+                    })
                 }
 
-            } else {
-                end({
-                    success: false,
-                    reason: "No timestamp submitted"
-                })
             }
+
+
         } else {
             end({
                 success: false,
@@ -210,6 +270,7 @@ app.post("/api/check", async (req, res) => {
         res.end((JSON.stringify(json)))
     }
 })
+
 
 app.get("/dashboard", (req, res) => {
     res.render("dashboard")
@@ -269,12 +330,12 @@ app.get("/auth", (req, res) => {
     }
 })
 
-app.get("*", async(req, res) => {
+app.get("*", async (req, res) => {
     var id = req.url.substr(1)
-    if(!isNaN(Number(req.url.substr(1)))){
+    if (!isNaN(Number(req.url.substr(1)))) {
         var user = await db.query_one("SELECT * FROM users WHERE barcode = ?", id)
-        if(user){
-            res.redirect(user.qr_redir)
+        if (user) {
+            res.status(301).redirect(user.qr_redir)
         }
     }
 })
@@ -282,11 +343,11 @@ app.get("*", async(req, res) => {
 io.on("connection", socket => {
 
     socket.on("unsync", info => {
-        (async() => {
+        (async () => {
             var user = await get_user_from_token(info.token)
-            if(user){
+            if (user) {
                 var card_to_delete = await db.query_one("SELECT * FROM cards WHERE id = ? AND user = ?", [info.id, user.id])
-                if(card_to_delete){
+                if (card_to_delete) {
                     await db.query("DELETE FROM cards WHERE id = ?", info.id)
                     socket.emit("unsync_success")
                 }
@@ -295,9 +356,9 @@ io.on("connection", socket => {
     })
 
     socket.on("update_qr", info => {
-        (async() =>{
+        (async () => {
             var user = await get_user_from_token(info.token)
-            if(user){
+            if (user) {
                 await db.query("UPDATE users SET qr_redir = ? WHERE id = ?", [info.url, user.id])
                 socket.emit("qr_update_success", info.url)
             }
@@ -338,7 +399,7 @@ io.on("connection", socket => {
         (async () => {
             var user = await get_user_from_token(token)
             if (user) {
-                var cards = await db.query("SELECT * FROM cards WHERE user = ?", user.id)
+                var cards = await db.query("SELECT * FROM cards WHERE user = ? ORDER BY id DESC", user.id)
                 socket.emit("my_cards", cards)
             }
         })()
@@ -351,6 +412,7 @@ io.on("connection", socket => {
                 if (db_token) {
                     var user = await db.query_one("SELECT * FROM users WHERE id = ?", db_token.user)
                     if (user) {
+                        console.log(socket.handshake.headers["x-real-ip"])
                         user.checked_in = await is_checked_in(user.id)
                         online_users.push(new User(user.id, socket.id))
                         user.qr = await QR.toDataURL("te4.ygstr.com/" + user.barcode, {
@@ -419,6 +481,16 @@ io.on("connection", socket => {
         }
     })
 
+    socket.on("get_history", info => {
+        (async () => {
+            var user = await get_user_from_token(info.token)
+            if (user) {
+                var history = await db.query("SELECT * FROM checks WHERE user = ?", user.id)
+                socket.emit("history", history)
+            }
+        })()
+    })
+
     socket.on("set_title", data => {
         if (data.token && data.title) {
             if (titles.indexOf(data.title) != -1) {
@@ -447,7 +519,16 @@ async function check_in(user_id, type) {
     var user = await db.query_one("SELECT * FROM users WHERE id = ?", user_id)
     if (user) {
         var checked_in = await is_checked_in(user_id)
-        await db.query("INSERT INTO checks (user, check_in, time, type) VALUES (?, ?, ?, ?)", [user.id, !checked_in, Date.now(), type])
+        var original_time = Date.now()
+        var users_last_check = await db.query_one("SELECT * FROM checks WHERE user = ? ORDER BY original_time DESC", user_id)
+        if (users_last_check) {
+            if ((Date.now() - users_last_check.original_time) < 60 * 1000 /* One minute */ ) {
+                original_time = users_last_check.original_time
+                await db.query("DELETE FROM checks WHERE id = ?", users_last_check.id) // Delete last check
+                console.log("DELETED")
+            }
+        }
+        await db.query("INSERT INTO checks (user, check_in, time, type, original_time) VALUES (?, ?, ?, ?, ?)", [user.id, !checked_in, Date.now(), type, original_time])
         for (online_user of online_users) {
             if (online_user.user_id == user.id) {
                 io.to(online_user.socket_id).emit("check_in_update", !checked_in)
@@ -471,7 +552,7 @@ async function get_user_from_token(token) {
 }
 
 async function is_checked_in(user_id) {
-    var user_status = await db.query_one("SELECT * FROM checks WHERE user = ? ORDER BY time DESC LIMIT 1", user_id)
+    var user_status = await db.query_one("SELECT * FROM checks WHERE user = ? ORDER BY original_time DESC LIMIT 1", user_id)
     if (!user_status) return false
     return user_status.check_in
 }

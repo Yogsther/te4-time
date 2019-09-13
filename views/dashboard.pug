@@ -3,14 +3,16 @@ block content
     span(hidden id="token") #{token}
     div(id="wrap")
         div(id="header")
-            img(src="img/logo_256.png" id="header-logo" alt="")
+            img(src="img/logo_256_black.png" id="header-logo" alt="")
             span(id="welcome-banner")
                 //span(id="checked-in-status") Checked in
         div(id="content")
+            canvas(id="history" width="600" height="400")
             button(class="mdc-button mdc-button--raised" id="check-in-button" onclick="check_in()") CHECK IN
             button(class="mdc-button" id="log-out-button" onclick="logout()") Log out
             div(id="card" onclick="open_card_menu()")
                 img(src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+P+/HgAFhAJ/wlseKgAAAABJRU5ErkJggg==", alt="Card" id="card_img")
+        div(id="second-card-position")
     div(id="overlay")
 
     script(src="js/card.js")

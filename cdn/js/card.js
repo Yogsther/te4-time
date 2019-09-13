@@ -4,13 +4,12 @@ var images = {
     nti: "img/nti.png",
     logo: "img/logo_256_black.png",
     strip: "img/strip.png",
+    strip_black: "img/strip_black.png",
     contactless: "img/contactless.png"
 }
 
 
-
-
-function generate_card(card_info) {
+function generate_card(card_info, checked_in = true) {
     if (!me && !card_info) return
     if (!card_info) card_info = me
 
@@ -21,7 +20,7 @@ function generate_card(card_info) {
 
     var logo = images.logo
     var nti = images.nti
-    var strip = images.strip
+    var strip = checked_in ? images.strip : images.strip_black
 
     ctx.fillStyle = "white"
     ctx.fillRect(0, 0, canvas.width, canvas.height)
@@ -39,8 +38,6 @@ function generate_card(card_info) {
     ctx.fillText(card_info.first_name, 80, 240)
 
     var nti_scale = .8
-
-
     
     ctx.drawImage(logo, 60, 735, 100, 100)
     ctx.drawImage(nti, (canvas.width / 2 - (nti.width / 2) * nti_scale), (canvas.height - 350 - (nti.height * nti_scale)), nti.width * nti_scale, nti.height * nti_scale)
