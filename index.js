@@ -196,15 +196,29 @@ function log(msg) {
  */
 
 app.post("/api/check", async (req, res) => {
+    /* Body of the request is the package with content (token, serial) */
     var body = req.body
+    /* Make sure token is provided */
     if (body.token === config.token) {
+        /* Make sure the card is also included */
         if (body.card) {
+            /* Check if the latest link process has gone over the duration, if not link the card submitted */
             if (Date.now() - link_mode.started > link_mode.duration * 1000) {
+                /**
+                 * Check in the user via card
+                 * Get the card from te4:cards in the database via it's serial
+                 */
                 var card = await db.query_one("SELECT * FROM cards WHERE serial = ?", body.card)
+                /* Maker sure the card exists in the database */
                 if (card) {
+                    /* Get coresponding user form the database (te4:users) */
                     var user = await db.query_one("SELECT * FROM users WHERE id = ?", card.user)
+                    /* Make sure the user also exists (this is important if users are deleted and cards are still linked) */
+                    /* TODO: If the user doesn't exists it should delete the card from the database */
                     if (user) {
+                        /* Check in the user */
                         var checked_in = await check_in(user.id, "card")
+                        /* Responde the the request with a successfull check-in or check-out */
                         end({
                             success: true,
                             write: false,
@@ -225,21 +239,27 @@ app.post("/api/check", async (req, res) => {
                     })
                 }
             } else {
+                /* LINK CARD TO USER */
+                /* Check if the card is already indexed in the database */
                 var existing_card = await db.query_one("SELECT * FROM cards WHERE serial = ?", body.card)
                 if (!existing_card) {
-                    // LINK MODE
+                    /* Card is not in the database, link it! */
+                    /* Insert a new card into the database and response with success and write */
                     await db.query("INSERT into cards (user, serial, active, created) VALUES (?, ?, ?, ?)", [link_mode.user, body.card, true, Date.now()])
                     end({
                         success: true,
                         write: true,
                         timestamp: Date.now()
                     })
+                    /* Check if the user is still in the browser and send a success flag to their live websocket */
                     for (socket_user of online_users) {
                         if (socket_user.user_id == link_mode.user) {
                             io.to(socket_user.socket_id).emit("write_success", body.card)
                         }
                     }
+
                     log("Linked card for user " + link_mode.user + ", card: " + body.card)
+                    /* Reset link-mode so that is is now avalible again */
                     link_mode.user = 0
                     link_mode.started = 0
                 } else {
@@ -250,8 +270,6 @@ app.post("/api/check", async (req, res) => {
                 }
 
             }
-
-
         } else {
             end({
                 success: false,
@@ -264,13 +282,17 @@ app.post("/api/check", async (req, res) => {
             reason: "Invalid token"
         })
     }
-    /*  })() */
 
+    /**
+     * Responde to the request with a JSON
+     * @param {*} json Response
+     */
     function end(json) {
         res.end((JSON.stringify(json)))
     }
 })
 
+/* Express routes */
 
 app.get("/dashboard", (req, res) => {
     res.render("dashboard")
@@ -284,33 +306,50 @@ app.get("/admin", (req, res) => {
     res.render("admin")
 })
 
+/* API callback when authenticating with the slack login */
 app.get("/auth", (req, res) => {
+    /* Make sure the slack code is submitted */
     if (req.query.code) {
+        /* Send a request to slack to get user information from the login */
         https.get(`https://slack.com/api/oauth.access?client_id=${config.client_id}&client_secret=${config.client_secret}&code=${req.query.code}`, resp => {
             var data = ''
             resp.on('data', (chunk) => {
                 data += chunk
             })
             resp.on('end', () => {
+                /* Once the data has been downloaded, parse it into a JSON */
                 data = JSON.parse(data)
+                /* If the request and code was successfull */
                 if (data.ok) {
-                    if (data.team.domain === config.slack_team) {
+                    /** 
+                     * Make sure the slack team domain is correct (config.json:slack_team) 
+                     * This is so only authorized people (people in your team) are allowed to login and 
+                     * use the website
+                     */
+                    if (data.team.domain === config.slack_team && config.slack_team.length > 0) {
                         (async () => {
+                            /* Check if the user is already signed up */
                             var user = await db.query_one("SELECT * FROM users WHERE email = ?", data.user.email)
                             if (user) {
-                                // Generate new token for user
+                                /* If they are, generate a new login token for the user */
                                 var token = hash()
+                                /* Save the new token */
                                 await db.query("INSERT INTO tokens (user, token, created) VALUES (?, ?, ?)", [user.id, token, Date.now()])
+                                /* Send them to the dashboard with the new token (it will be saved in their localStorage, then they will be redirected) */
                                 res.render("dashboard", {
                                     token
                                 })
                                 log("Generated a new token for " + user.first_name + " " + user.last_name)
                             } else {
-                                // Create account
+                                /* Create a new account for the user */
                                 await db.query("INSERT INTO users (first_name, last_name, email, avatar, access_token, created, barcode) VALUES (?, ?, ?, ?, ?, ?, ?)", [data.user.name.split(" ")[0], data.user.name.split(" ")[1], data.user.email, data.user.image_512, data.access_token, Date.now(), Math.floor(10000000000 + Math.random() * 90000000000)])
+                                /* Retrieve the new account */
                                 user = await db.query_one("SELECT * FROM users WHERE email = ?", data.user.email)
+                                /* Generate login token for the user */
                                 var token = hash()
+                                /* Save token to database */
                                 await db.query("INSERT INTO tokens (user, token, created) VALUES (?, ?, ?)", [user.id, token, Date.now()])
+                                /* Redirect them to the first-time setup page */
                                 res.render("joined", {
                                     token: token,
                                     name: user.first_name + " " + user.last_name,
@@ -330,24 +369,38 @@ app.get("/auth", (req, res) => {
     }
 })
 
+/**
+ * Express route to catch all other pages
+ * This is mainly to redirect QR codes for users
+ */
 app.get("*", async (req, res) => {
+    /* Get the page minus the slash ([/]9834983) */
     var id = req.url.substr(1)
+    /* For QR codes (that are actually barcodes) make sure it's a number */
     if (!isNaN(Number(req.url.substr(1)))) {
+        /* Get the user from the database */
         var user = await db.query_one("SELECT * FROM users WHERE barcode = ?", id)
         if (user) {
+            /* Redirect client to the users qr-code redir choice */
             res.status(301).redirect(user.qr_redir)
         }
     }
 })
 
+/* SOCKET.IO Functions */
 io.on("connection", socket => {
 
+    /* Unsync (unlink) cards */
     socket.on("unsync", info => {
         (async () => {
+            /* Get user from database */
             var user = await get_user_from_token(info.token)
+            /* Make sure user exists */
             if (user) {
+                /* Get the card to be unsynced */
                 var card_to_delete = await db.query_one("SELECT * FROM cards WHERE id = ? AND user = ?", [info.id, user.id])
                 if (card_to_delete) {
+                    /* Delete the card */
                     await db.query("DELETE FROM cards WHERE id = ?", info.id)
                     socket.emit("unsync_success")
                 }
@@ -355,35 +408,45 @@ io.on("connection", socket => {
         })()
     })
 
+    /* Update QR codes redirect link */
     socket.on("update_qr", info => {
         (async () => {
             var user = await get_user_from_token(info.token)
             if (user) {
+                /* Update QR code in the database */
                 await db.query("UPDATE users SET qr_redir = ? WHERE id = ?", [info.url, user.id])
                 socket.emit("qr_update_success", info.url)
             }
         })()
     })
 
+    /* Get job-titles, for first-time signup */
     socket.on("get_titles", () => {
         socket.emit("titles", titles)
     })
 
+    /* Remove users from online_users when they disconnect from the websocket */
     socket.on("disconnect", () => {
+        /* Loop through all users and match their socket_id */
         for (var i = 0; i < online_users; i++) {
+            /* Splice them if they match (remove from the array) */
             if (user.socket_id == socket.id) online_users.splice(i, 1)
         }
     })
 
+    /* User requests to initiate link mode with their account to link a card */
     socket.on("request_to_write_card", token => {
         (async () => {
             var user = await get_user_from_token(token)
             if (user) {
+                /* Get all cards from the user to make sure they are allowed to link more cards (max 5) */
                 var cards = await db.query("SELECT * FROM cards WHERE user = ?", user.id)
                 if (cards.length >= 5) {
                     socket.emit("err", "You can only link 5 cards at a time. Please remove one or more cards and retry.")
                 } else {
+                    /* If the console is not already in link mode, initiate it. */
                     if (Date.now() - link_mode.started > link_mode.duration * 1000) {
+                        /* Initiate link mode */
                         link_mode.started = Date.now()
                         link_mode.user = user.id
                         socket.emit("read_ready", link_mode.duration)
@@ -395,6 +458,10 @@ io.on("connection", socket => {
         })()
     })
 
+    /** 
+     * User requests to get the info of their cards.
+     * Used in the card preview page where you link and unlink cards
+     */
     socket.on("get_cards_info", token => {
         (async () => {
             var user = await get_user_from_token(token)
@@ -405,22 +472,39 @@ io.on("connection", socket => {
         })()
     })
 
+    /* Login user, can only be done through a login-token */
     socket.on("login", token => {
+        /* Make sure the token is defined */
         if (token) {
             (async () => {
+                /* Check token in the te4:token table and get the user id */
                 var db_token = await db.query_one("SELECT * FROM tokens WHERE token = ?", token)
                 if (db_token) {
                     var user = await db.query_one("SELECT * FROM users WHERE id = ?", db_token.user)
                     if (user) {
-                        console.log(socket.handshake.headers["x-real-ip"])
+                        /* Get the IP of the user */
+                        var ip = socket.handshake.headers["x-real-ip"]
+                        /** 
+                         * Update user privilege 
+                         * If the user is on one of the config.json:house_ips they
+                         * have privilege and can check in, otherwise if the privilege is false
+                         * they can only checkout. This is to prevent users from checking in when they are not
+                         * in the facility. Perhaps we may add a feature to checkin from home in a special mode
+                         * and that their shifts are marked as "from home"
+                         */
+                        user.privilege = (config.house_ips.indexOf(ip) != -1 && config.house_ips.length > 0)
+                        /* Update the users check-in status */
                         user.checked_in = await is_checked_in(user.id)
+                        /* Add user to the online_users array */
                         online_users.push(new User(user.id, socket.id))
+                        /* Render the users QR code */
                         user.qr = await QR.toDataURL("te4.ygstr.com/" + user.barcode, {
                             rendererOpts: {
                                 quality: 1,
                                 errorCorrectionLevel: 'H'
                             }
                         })
+                        /* Emit all login information */
                         socket.emit("login", user)
                     } else {
                         socket.emit("login", "User does not exist")
@@ -432,6 +516,7 @@ io.on("connection", socket => {
         }
     })
 
+    /* Checking in / out via web */
     socket.on("check_in", token => {
         if (token) {
             (async () => {
@@ -439,28 +524,48 @@ io.on("connection", socket => {
                 if (db_token) {
                     var user = await db.query_one("SELECT * FROM users WHERE id = ?", db_token.user)
                     if (user) {
-                        check_in(user.id, "web")
+                        /* Get IP and make sure the user is allowed to check in from that location */
+                        var ip = socket.handshake.headers["x-real-ip"]
+                        if((config.house_ips.indexOf(ip) != -1 && config.house_ips.length > 0)){
+                            check_in(user.id, "web")
+                        } else {
+                            socket.emit("err", "You are not on any of the house IP's")
+                        }
                     }
                 }
             })()
         }
     })
 
+    /**
+     * Get all accounts
+     * Only allowed for admin accounts
+     * Get's a list of all users. Used for card generator and teacher monitoring
+     */
     socket.on("get_accounts", token => {
         (async () => {
             var user = await get_user_from_token(token)
             if (user) {
+                /* Make sure the user is admin */
                 if (user.admin) {
+                    /* Query all users */
                     var all_users = await db.query("SELECT * FROM users")
                     for (user of all_users) {
+                        /* Generate their QR codes */
                         user.qr = await QR.toDataURL("te4.ygstr.com/" + user.barcode)
                     }
+                    /* Emit all users */
                     socket.emit("all_users", all_users)
                 }
             }
         })()
     })
 
+    /**
+     * ! DEPRECATED
+     * Was used to link cards as an admin. Now it's no longer used.
+     * See socket.on("request_to_write_card") for the new function
+     */
     socket.on("link_card", data => {
         if (data.token && data.user) {
             (async () => {
@@ -481,6 +586,8 @@ io.on("connection", socket => {
         }
     })
 
+    /* Get check in history to be visualised on the front page */
+    // TODO: Show history between two dates (from: 1900000 -> Date.now())
     socket.on("get_history", info => {
         (async () => {
             var user = await get_user_from_token(info.token)
@@ -491,14 +598,18 @@ io.on("connection", socket => {
         })()
     })
 
+    /* Set job title in the setup screen. Could be allowed in the future for people in some other menu to change after the fact */
     socket.on("set_title", data => {
+        /* Make sure a title and token is provided */
         if (data.token && data.title) {
+            /* Make sure the title is valid (exists in the titles array) */
             if (titles.indexOf(data.title) != -1) {
                 (async () => {
                     var token = await db.query_one("SELECT * FROM tokens WHERE token = ?", data.token)
                     if (token) {
                         var user = await db.query_one("SELECT * FROM users WHERE id = ?", token.user)
                         if (user) {
+                            /* Update their title */
                             db.query("UPDATE users SET title = ? WHERE id = ?", [data.title, user.id])
                             socket.emit("title_updated")
                         }
@@ -515,6 +626,11 @@ io.on("connection", socket => {
     })
 })
 
+/**
+ * Check in or out a user
+ * @param {Int} user_id ID of the user
+ * @param {String} type Type of check-in (web, card)
+ */
 async function check_in(user_id, type) {
     var user = await db.query_one("SELECT * FROM users WHERE id = ?", user_id)
     if (user) {
@@ -539,6 +655,10 @@ async function check_in(user_id, type) {
     }
 }
 
+/**
+ * Get a user (te4:users) via their login token (te4:tokens)
+ * @param {*} token The users login token
+ */
 async function get_user_from_token(token) {
     var db_token = await db.query_one("SELECT * FROM tokens WHERE token = ?", token)
     if (db_token) {
@@ -551,12 +671,17 @@ async function get_user_from_token(token) {
     }
 }
 
+/**
+ * Check if a user is checked in
+ * @param {*} user_id ID of the user
+ */
 async function is_checked_in(user_id) {
     var user_status = await db.query_one("SELECT * FROM checks WHERE user = ? ORDER BY original_time DESC LIMIT 1", user_id)
     if (!user_status) return false
     return user_status.check_in
 }
 
+/* Startup screen */
 console.log(`
         T4 Time started
     ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ 
